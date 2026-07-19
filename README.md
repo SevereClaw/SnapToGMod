@@ -28,9 +28,9 @@ venv\Scripts\activate
 pip install -r requirements.txt
 python SnapSt.py
 
-### Шаги Сборка .exe
+Сборка .exe
 Bashpip install pyinstaller
 pyinstaller --onefile --windowed --name SnapToGMod SnapSt.py
 
-### Шаги Автор: SevereClaw
+Автор: SevereClaw
 
