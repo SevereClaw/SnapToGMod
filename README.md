@@ -6,7 +6,7 @@
 
 ## Скачать готовую версию (Windows)
 
-**[⬇️ Скачать SnapToGMod.exe](https://github.com/SevereClaw/SnapToGMod/releases/latest/download/SnapToGMod.py)**
+**[⬇️ Скачать SnapToGMod.py](https://github.com/SevereClaw/SnapToGMod/releases/latest/download/SnapToGMod.py)**
 
 ---
 
