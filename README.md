@@ -1,12 +1,12 @@
 # SnapToGMod
 
-**Инструмент для Garry's Mod** — запускает игру **щелчком пальцев** по микрофону (или горячей клавишей). Идеально для быстрого входа на сервер.
+**Инструмент для Garry's Mod** — запускает игру по щелчку пальцами / хлопку через микрофон + резервная горячая клавиша (Ctrl+Alt+G).
 
 ---
 
 ## Скачать готовую версию (Windows)
 
-**[⬇️ Скачать SnapToGMod.py](https://github.com/SevereClaw/SnapToGMod/releases/tag/Release)**
+**[⬇️ Скачать snap_to_gmod.py](https://github.com/SevereClaw/SnapToGMod/releases/download/Release/snap_to_gmod.py)**
 
 ---
 
