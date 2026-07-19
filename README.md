@@ -1,12 +1,12 @@
 # SnapToGMod
 
-**Инструмент для Garry's Mod** — переносит/конвертирует снапшоты, модели или текстуры.
+**Инструмент для Garry's Mod** — запускает игру **щелчком пальцев** по микрофону (или горячей клавишей). Идеально для быстрого входа на сервер.
 
 ---
 
 ## Скачать готовую версию (Windows)
 
-**[[⬇️ Скачать SnapToGMod.py]](https://github.com/SevereClaw/SnapToGMod/releases/download/Release/snap_to_gmod.py)**
+**[⬇️ Скачать SnapToGMod.exe](https://github.com/SevereClaw/SnapToGMod/releases/download/Release/SnapToGMod.py)**
 
 ---
 
@@ -28,9 +28,14 @@ venv\Scripts\activate
 pip install -r requirements.txt
 python SnapSt.py
 
-Сборка .exe
-Bashpip install pyinstaller
-pyinstaller --onefile --windowed --name SnapToGMod SnapSt.py
+```
 
-Автор: SevereClaw
+### Сборка в .exe
 
+```
+pip install pyinstaller
+pyinstaller --onefile --noconsole --name SnapToGMod SnapSt.py
+```
+Готовый файл будет в папке dist
+
+### Автор: SevereClaw
