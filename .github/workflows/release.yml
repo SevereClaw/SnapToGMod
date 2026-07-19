@@ -1,0 +1,46 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Validate
+        run: |
+          python -m compileall -q .
+          python -m pytest -q
+      - name: Build executable
+        run: python -m PyInstaller --clean --noconfirm SnapToGMod.spec
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnapToGMod-${{ github.ref_name }}
+          path: dist/SnapToGMod.exe
+      - name: Create or update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag dist/SnapToGMod.exe --clobber
+          } else {
+            gh release create $tag dist/SnapToGMod.exe --title $tag --generate-notes
+          }

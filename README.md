@@ -1,84 +1,105 @@
-# SnapToGMod
+# Snap-to-GMod v3.0.0
 
-SnapToGMod listens to the microphone, detects a finger snap or clap, and opens Garry's Mod through Steam with a connection to the selected server. A global `Ctrl+Alt+G` hotkey is available as a fallback.
+Windows-приложение, которое слушает микрофон, распознаёт щелчок пальцами или хлопок и подключает Garry's Mod к выбранному серверу через Steam. Резервный запуск выполняется глобальной горячей клавишей `Ctrl+Alt+G`.
 
-## Requirements
+## Возможности
 
-- Windows 10 or Windows 11
-- Python 3.9 or newer; Python 3.12 is recommended
-- Steam and Garry's Mod
-- A working microphone
+- распознавание короткого широкополосного щелчка или хлопка;
+- выбор микрофона, тест уровня и калибровка чувствительности;
+- адаптивная чувствительность;
+- несколько серверов, избранное, поиск и недавние серверы;
+- проверка доступности Source-сервера перед запуском;
+- защита от повторного запуска GMod и запусков во время обновления Steam;
+- обратный отсчёт с возможностью отмены;
+- глобальные горячие клавиши запуска и паузы;
+- уведомления Windows и Discord;
+- статистика запусков и экспорт CSV;
+- автозапуск Windows;
+- проверка GitHub Releases и автообновление собранного `.exe`.
 
-## Install from source
+## Требования
 
-Open PowerShell:
+- Windows 10 или Windows 11;
+- Python 3.10+ для запуска из исходников;
+- установленный Steam с зарегистрированным протоколом `steam://`;
+- микрофон.
+
+## Запуск из исходников
 
 ```powershell
 git clone https://github.com/SevereClaw/SnapToGMod.git
 cd SnapToGMod
 
-py -3.12 -m venv .venv
-Set-ExecutionPolicy -Scope Process Bypass
+py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python SnapSt.py
+py -m pip install --upgrade pip
+pip install -r requirements.txt
+python main.py
 ```
 
-For Command Prompt, activate the environment with:
+После запуска приложение появляется в системном трее. Настройки открываются правой кнопкой по значку.
 
-```bat
-.venv\Scripts\activate.bat
-```
-
-The application runs in the Windows notification area. Right-click the tray icon to select or add a server, adjust sensitivity, test the microphone, configure the hotkey, and enable autostart.
-
-## Build an executable
+## Сборка `.exe`
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-dev.txt
-pyinstaller --clean --onefile --noconsole --name SnapToGMod SnapSt.py
+.\build.ps1
 ```
 
-The result is written to:
+Готовый файл: `dist\SnapToGMod.exe`.
 
-```text
-dist\SnapToGMod.exe
-```
-
-## Configuration and logs
-
-Runtime data is stored outside the repository:
-
-```text
-%APPDATA%\SnapToGMod\config.json
-%APPDATA%\SnapToGMod\stats.json
-%APPDATA%\SnapToGMod\snap_to_gmod.log
-```
-
-Delete `config.json` to restore default settings.
-
-## Releases
-
-The repository includes a GitHub Actions workflow that validates the script and builds `SnapToGMod.exe` on Windows. Every tag matching `v*` also creates or updates a GitHub Release and attaches the executable.
-
-Before publishing a new release:
-
-1. Update `APP_VERSION` in `SnapSt.py`.
-2. Commit and push the change.
-3. Create a semantic-version tag.
+Ручная команда:
 
 ```powershell
-git tag v1.0.1
-git push origin v1.0.1
+pip install -r requirements-dev.txt
+pyinstaller --clean --noconfirm SnapToGMod.spec
 ```
 
-Use tags such as `v1.0.0`, `v1.0.1`, and `v1.1.0`. Do not use a tag named `Release`; the application's update checker expects numeric version tags.
+## Выпуск v3.0.0
 
-## Troubleshooting
+Автопроверка обновлений настроена на репозиторий `SevereClaw/SnapToGMod`. Для корректной работы обновлений релиз должен иметь тег формата `v3.0.0` и содержать файл `SnapToGMod.exe`.
 
-If the microphone is not detected, check Windows microphone permissions and the default input device. If the hotkey does not work while Steam or Garry's Mod is running as administrator, run SnapToGMod as administrator as well.
+```powershell
+git add .
+git commit -m "Release v3.0.0"
+git push origin main
+git tag v3.0.0
+git push origin v3.0.0
+```
 
-Detailed errors are written to `%APPDATA%\SnapToGMod\snap_to_gmod.log`.
+Workflow `release.yml` соберёт Windows `.exe` и прикрепит его к GitHub Release.
+
+## Структура
+
+| Файл | Назначение |
+|---|---|
+| `main.py` | точка входа и связывание модулей |
+| `config.py` | версия, репозиторий, пути и конфигурация |
+| `audio.py` | распознавание звука и поток микрофона |
+| `launcher.py` | запуск GMod и логика срабатывания |
+| `servers.py` | серверы и A2S_INFO-проверка |
+| `tray.py` | меню трея и окна tkinter |
+| `hotkeys.py` | глобальные горячие клавиши |
+| `updates.py` | GitHub Releases и автообновление |
+| `discord_notify.py` | Discord-уведомления |
+| `stats.py` | статистика и CSV |
+| `system.py` | Windows-интеграция |
+| `sound.py` | звуки событий |
+| `logutil.py` | журналирование и ротация лога |
+
+## Данные приложения
+
+Настройки, журнал и статистика хранятся в:
+
+```text
+%APPDATA%\SnapToGMod\
+```
+
+Основные файлы:
+
+- `config.json` — пользовательские настройки;
+- `stats.json` — статистика запусков;
+- `snap_to_gmod.log` — журнал.
+
+## Ограничение проверки Steam
+
+Проверка обновления Steam является эвристикой по `bootstrap_log.txt`. Она может давать ложные результаты и отключается в меню настроек.

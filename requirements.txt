@@ -1,5 +1,5 @@
-numpy>=1.26
-sounddevice>=0.5.1
-Pillow>=10.0
-pystray>=0.19.5
-keyboard>=0.13.5; platform_system == "Windows"
+sounddevice
+numpy
+pystray
+pillow
+keyboard

@@ -1,42 +1,33 @@
-# Python bytecode and caches
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
+*.pyd
 .pytest_cache/
-.mypy_cache/
 .ruff_cache/
 
 # Virtual environments
 .venv/
 venv/
 env/
-ENV/
 
-# Packaging and PyInstaller
+# Build output
 build/
 dist/
 *.egg-info/
-*.egg
-*.spec
 
-# IDE and OS files
+# PyInstaller local output
+*.manifest
+
+# IDE / OS
 .vscode/
 .idea/
-*.swp
-*.swo
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Local environment and generated files
-.env
-*.log
-*.tmp
-*.temp
-*.exe
-*.zip
-*.7z
-
-# Local application data copied into the repository by mistake
+# Local application data and exports
 config.json
 stats.json
-snap_to_gmod.log*
+*.log
+*.log.old
+*.csv
