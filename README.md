@@ -1,15 +1,12 @@
-cat > README.md << 'EOF'
 # SnapToGMod
 
-**Инструмент для Garry's Mod** — переносит/конвертирует снапшоты/модели/текстуры (или что делает твоя программа).
+**Инструмент для Garry's Mod** — переносит/конвертирует снапшоты, модели или текстуры.
 
 ---
 
 ## Скачать готовую версию (Windows)
 
-[![Latest Release](https://img.shields.io/github/v/release/SevereClaw/SnapToGMod)](https://github.com/твой_ник/SnapToGMod/releases/latest)
-
-→ **[Скачать SnapToGMod.exe](https://github.com/SevereClaw/SnapToGMod/releases/latest/download/SnapToGMod.exe)**
+**[⬇️ Скачать SnapToGMod.exe](https://github.com/SevereClaw/SnapToGMod/releases/latest/download/SnapToGMod.exe)**
 
 ---
 
@@ -22,11 +19,11 @@ cat > README.md << 'EOF'
 ### Шаги
 
 ```bash
-git clone https://github.com/твой_ник/SnapToGMod.git
+git clone https://github.com/SevereClaw/SnapToGMod.git
 cd SnapToGMod
 
-# Создаём виртуальное окружение (рекомендуется)
 python -m venv venv
 venv\Scripts\activate
 
 pip install -r requirements.txt
+python SnapSt.py
