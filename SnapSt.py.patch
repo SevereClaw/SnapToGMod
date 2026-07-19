@@ -1,0 +1,27 @@
+--- /tmp/SnapSt.py	2026-07-19 14:04:35.228637157 +0000
++++ /mnt/data/SnapToGMod-repo-fix/SnapSt.py	2026-07-19 14:07:14.114770733 +0000
+@@ -40,13 +40,13 @@
+ 
+ ЗАПУСК ИЗ ИСХОДНИКА:
+     pip install sounddevice numpy pystray pillow keyboard
+-    python snap_to_gmod.py
++    python SnapSt.py
+     (keyboard нужен только для горячей клавиши; без него всё остальное
+     работает как обычно, просто хоткей будет недоступен)
+ 
+ СБОРКА В .EXE (чтобы не требовался Python на компьютере):
+     pip install pyinstaller
+-    pyinstaller --onefile --noconsole --name SnapToGMod snap_to_gmod.py
++    pyinstaller --onefile --noconsole --name SnapToGMod SnapSt.py
+     Готовый файл появится в папке dist\\SnapToGMod.exe.
+ 
+ СМЕНА ЗНАЧКА .EXE (внешний вид файла — НЕ цветной кружок-индикатор в трее,
+@@ -83,7 +83,7 @@
+ # чтобы заработала проверка обновлений (пункт меню + тихая проверка при запуске).
+ # Требуется, чтобы в репозитории были GitHub Releases с тегами вида "v1.0.1".
+ # Если оставить как есть, проверка обновлений просто вежливо скажет, что не настроена.
+-GITHUB_REPO = "yourusername/snap-to-gmod"
++GITHUB_REPO = "SevereClaw/SnapToGMod"
+ 
+ 
+ def get_settings_dir() -> str:

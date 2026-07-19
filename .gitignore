@@ -1,0 +1,42 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging and PyInstaller
+build/
+dist/
+*.egg-info/
+*.egg
+*.spec
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local environment and generated files
+.env
+*.log
+*.tmp
+*.temp
+*.exe
+*.zip
+*.7z
+
+# Local application data copied into the repository by mistake
+config.json
+stats.json
+snap_to_gmod.log*
