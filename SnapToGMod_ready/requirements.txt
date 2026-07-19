@@ -1,0 +1,5 @@
+sounddevice
+numpy
+pystray
+pillow
+keyboard
