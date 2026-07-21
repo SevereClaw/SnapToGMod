@@ -1,10 +1,9 @@
 """
 discord_notify.py
 ------------------
-Уведомление в Discord через вебхук при срабатывании. Адрес вебхука задан
-константой DISCORD_WEBHOOK_URL в config.py и пользователю не показывается
-и не редактируется — менять можно только своё отображаемое имя и
-включать/выключать уведомления целиком.
+Уведомление в Discord через вебхук при срабатывании. Адрес вебхука читается
+из переменной окружения SNAPTOGMOD_DISCORD_WEBHOOK_URL и не хранится в коде.
+Пользователь меняет только отображаемое имя и включает/выключает уведомления.
 """
 from __future__ import annotations
 
@@ -32,6 +31,12 @@ def get_default_display_name() -> str:
 
 def send_discord_notification(cfg: AppConfig, server: Server, logger) -> None:
     if not cfg.discord_notify_enabled:
+        return
+    if not DISCORD_WEBHOOK_URL:
+        logger.warning(
+            "Discord-уведомления включены, но переменная "
+            "SNAPTOGMOD_DISCORD_WEBHOOK_URL не задана."
+        )
         return
 
     def _send():

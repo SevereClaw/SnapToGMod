@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyd
 .pytest_cache/
+.mypy_cache/
 .ruff_cache/
 
 # Virtual environments
@@ -10,24 +11,21 @@ __pycache__/
 venv/
 env/
 
-# Build output
+# Build artifacts
 build/
 dist/
-*.egg-info/
+*.spec.bak
 
-# PyInstaller local output
-*.manifest
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+config.json
+stats.json
+*.log
 
-# IDE / OS
+# Editors and OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Local application data and exports
-config.json
-stats.json
-*.log
-*.log.old
-*.csv

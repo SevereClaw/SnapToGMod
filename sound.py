@@ -35,3 +35,19 @@ def play_event_sound(cfg: AppConfig, event: str, logger) -> None:
             winsound.MessageBeep(beep)
     except Exception as e:
         logger.warning("Не удалось воспроизвести звук (%s): %s", event, e)
+
+
+def play_character_sound(cfg: AppConfig, character, logger) -> None:
+    """Звук при успешном голосовом выборе конкретного персонажа. Если у
+    персонажа задан свой .wav (character.sound_file) — играет его, иначе —
+    тот же стандартный сигнал, что и при обнаружении щелчка."""
+    if not cfg.sound_enabled or winsound is None:
+        return
+    path = getattr(character, "sound_file", "") or None
+    try:
+        if path and os.path.exists(path):
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        else:
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+    except Exception as e:
+        logger.warning("Не удалось воспроизвести звук персонажа «%s»: %s", getattr(character, "name", "?"), e)

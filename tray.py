@@ -26,6 +26,7 @@ import sound
 import stats as stats_mod
 import system
 import updates
+import voice_select
 from config import AppConfig, SENSITIVITY_PRESETS, SERVER_SEARCH_THRESHOLD, Server
 from logutil import tail_log_lines
 
@@ -112,6 +113,30 @@ def ask_text(title: str, prompt: str) -> Optional[str]:
             root.withdraw()
             root.attributes("-topmost", True)
             result["value"] = simpledialog.askstring(title, prompt, parent=root)
+            root.destroy()
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=_ask, daemon=True).start()
+    done.wait(timeout=120)
+    return result["value"]
+
+
+def ask_yes_no(title: str, prompt: str) -> bool:
+    """БЛОКИРУЕТ вызывающий поток до ответа — вызывать только из фонового потока."""
+    result = {"value": False}
+    done = threading.Event()
+
+    def _ask():
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            result["value"] = messagebox.askyesno(title, prompt, parent=root)
             root.destroy()
         except Exception:
             pass
@@ -233,7 +258,7 @@ def show_countdown_dialog(seconds: int, server_name: str, icon_state: IconStateM
     return result["proceed"]
 
 
-def open_log_viewer(state: dict, logger):
+def open_log_viewer(icon, state: dict, logger):
     def _window():
         try:
             import tkinter as tk
@@ -248,29 +273,56 @@ def open_log_viewer(state: dict, logger):
             def on_close():
                 state["visible"] = False
                 root.destroy()
+                # Галочка "Просмотр журнала" в трее иначе не сбрасывается
+                # сама — pystray перерисовывает пункты меню при клике по
+                # трею, а не при закрытии этого отдельного окна
+                # крестиком/кнопкой "Закрыть".
+                try:
+                    icon.update_menu()
+                except Exception:
+                    pass
 
             root.protocol("WM_DELETE_WINDOW", on_close)
             top = tk.Frame(root)
             top.pack(fill="x", padx=8, pady=6)
             tk.Label(top, text="Журнал программы (обновляется автоматически)", font=("Segoe UI", 10, "bold")).pack(side="left")
+
+            def copy_all():
+                root.clipboard_clear()
+                root.clipboard_append(text.get("1.0", "end-1c"))
+
             tk.Button(top, text="Закрыть", command=on_close).pack(side="right")
+            tk.Button(top, text="Скопировать всё", command=copy_all).pack(side="right", padx=(0, 6))
 
             text = tk.Text(root, font=("Consolas", 9), bg="#111111", fg="#d4d4d4", wrap="none")
             text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+            menu = tk.Menu(text, tearoff=0)
+            menu.add_command(label="Копировать", command=lambda: text.event_generate("<<Copy>>"))
+            menu.add_command(label="Выделить всё", command=lambda: text.tag_add("sel", "1.0", "end"))
+            text.bind("<Button-3>", lambda e: menu.tk_popup(e.x_root, e.y_root))
+            text.bind("<Control-a>", lambda e: (text.tag_add("sel", "1.0", "end"), "break")[-1])
+
             last_n = {"n": -1}
 
             def refresh():
                 if not state.get("visible"):
                     root.destroy()
                     return
-                lines = tail_log_lines(300)
-                if len(lines) != last_n["n"]:
-                    last_n["n"] = len(lines)
-                    at_bottom = text.yview()[1] >= 0.999
-                    text.delete("1.0", tk.END)
-                    text.insert(tk.END, "\n".join(lines))
-                    if at_bottom:
-                        text.see(tk.END)
+                # Пока у пользователя есть активное выделение в тексте — не
+                # перерисовываем содержимое: раньше автообновление раз в
+                # секунду делало text.delete()+insert() и сбрасывало
+                # выделение прямо во время копирования, из-за чего Ctrl+C
+                # ничего не копировал.
+                if not text.tag_ranges("sel"):
+                    lines = tail_log_lines(300)
+                    if len(lines) != last_n["n"]:
+                        last_n["n"] = len(lines)
+                        at_bottom = text.yview()[1] >= 0.999
+                        text.delete("1.0", tk.END)
+                        text.insert(tk.END, "\n".join(lines))
+                        if at_bottom:
+                            text.see(tk.END)
                 root.after(1000, refresh)
 
             refresh()
@@ -382,6 +434,591 @@ def start_calibration(calibration_state: dict, logger):
             root.mainloop()
         except Exception as e:
             logger.warning("Ошибка окна калибровки: %s", e)
+
+    threading.Thread(target=_window, daemon=True).start()
+
+
+_VOICE_GUIDE_TEXT = """САМЫЙ ПРОСТОЙ СПОСОБ
+
+Нажми кнопку «Запустить мастер настройки» ниже — программа сама скачает
+модель распознавания речи и сама сохранит все 3 картинки-шаблона: просто
+следуй подсказкам на экране и обводи мышью рамку вокруг того, что попросят.
+Ничего скачивать/переименовывать/копировать вручную не нужно.
+
+Слово-триггер по умолчанию — «удача». Поменять его можно в этом же
+подменю трея (пункт «Слово-триггер»).
+
+──────────────────────────────────────────────
+
+ЕСЛИ ЧТО-ТО НЕ ПОЛУЧАЕТСЯ — подробности для ручной настройки:
+
+1) Зависимости (в ТОМ ЖЕ venv/python, из которого потом собирается .exe!):
+       pip install -r requirements-voice.txt
+   Если программа запущена как .exe, а не как python main.py — этого
+   недостаточно, .exe нужно ПЕРЕСОБРАТЬ после установки зависимостей:
+       pyinstaller SnapToGMod.spec
+   Частая причина того, что при слове-триггере просто открывается пауза
+   и больше ничего не происходит: не установлен или не попал в сборку
+   .exe пакет opencv-python (модуль cv2). Кнопка «Запустить диагностику»
+   ниже проверяет это отдельно.
+
+2) Модель и шаблоны можно положить и вручную — путь открывает кнопка
+   «Открыть папку модели/шаблонов» ниже. Про требуемую структуру папок
+   написано в README.md рядом с программой.
+
+3) Порог совпадения (confidence, по умолчанию 0.7) — если шаблон почти
+   совпадает, но не находится, попробуйте понизить до 0.5-0.6 в
+   config.json (voice_match_confidence).
+"""
+
+
+def open_voice_guide(cfg: AppConfig, voice_engine: Optional["voice_select.VoiceSelectEngine"],
+                      guide_state: dict, save_config: Callable[[], None], char_manager_state: dict, logger):
+    if guide_state.get("visible"):
+        return
+    guide_state["visible"] = True
+
+    def _window():
+        try:
+            import tkinter as tk
+        except ImportError:
+            guide_state["visible"] = False
+            return
+        try:
+            root = tk.Tk()
+            root.title("Голосовой выбор персонажа — диагностика и гайд")
+            root.geometry("640x640")
+
+            def on_close():
+                guide_state["visible"] = False
+                root.destroy()
+
+            root.protocol("WM_DELETE_WINDOW", on_close)
+
+            nb_frame = tk.Frame(root)
+            nb_frame.pack(fill="both", expand=True, padx=8, pady=8)
+
+            wizard_row = tk.Frame(nb_frame)
+            wizard_row.pack(fill="x", pady=(0, 6))
+
+            def _open_manager():
+                open_character_manager(cfg, voice_engine, save_config, logger, char_manager_state, guide_state)
+
+            tk.Button(wizard_row, text="▶ Открыть менеджер персонажей", command=_open_manager,
+                      padx=10, pady=6, bg="#4caf50", fg="white", font=("Segoe UI", 9, "bold")).pack(fill="x")
+
+            guide_text = tk.Text(nb_frame, font=("Segoe UI", 9), wrap="word", height=12)
+            guide_text.insert("1.0", _VOICE_GUIDE_TEXT)
+            guide_text.configure(state="disabled")
+            guide_text.pack(fill="both", expand=True)
+
+            tk.Label(nb_frame, text="Статус: обновляется автоматически", font=("Segoe UI", 8), fg="#666").pack(
+                anchor="w", pady=(4, 0))
+            status_var = tk.StringVar(value="—")
+            tk.Label(nb_frame, textvariable=status_var, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+
+            diag_frame = tk.LabelFrame(nb_frame, text="Диагностика", padx=8, pady=6)
+            diag_frame.pack(fill="both", expand=True, pady=(8, 0))
+
+            diag_text = tk.Text(diag_frame, font=("Consolas", 9), height=12, wrap="word",
+                                 bg="#111111", fg="#d4d4d4")
+            diag_text.pack(fill="both", expand=True)
+
+            def line(msg, ok=None):
+                mark = "  " if ok is None else ("[OK] " if ok else "[!!] ")
+                diag_text.insert(tk.END, mark + msg + "\n")
+
+            def run_diagnostics():
+                diag_text.delete("1.0", tk.END)
+                try:
+                    report = voice_select.run_diagnostics(cfg)
+                except Exception as e:
+                    line(f"Ошибка диагностики: {e}", ok=False)
+                    return
+                line(f"Библиотеки: {'все на месте' if report['dependencies_available'] else 'не хватает: ' + ', '.join(report['missing_dependencies'])}",
+                     ok=report["dependencies_available"])
+                line(f"OpenCV (cv2): {report['cv2_msg']}", ok=report["cv2_ok"])
+                if report["model_problem"]:
+                    line(f"Модель: {report['model_problem']}", ok=False)
+                else:
+                    line(f"Модель: найдена в {report['model_dir']}", ok=True)
+                res = report["screen_resolution"]
+                line(f"Разрешение экрана сейчас: {res[0]}x{res[1]}" if res else "Разрешение экрана: не удалось определить")
+                for t in report["templates"]:
+                    if not t["exists"]:
+                        line(f"Общий шаблон {t['name']}: отсутствует ({t.get('error', 'нет файла')})", ok=False)
+                    else:
+                        size_txt = f", {t['size'][0]}x{t['size'][1]}px" if t.get("size") else ""
+                        line(f"Общий шаблон {t['name']}: есть{size_txt}", ok=True)
+                if not report["characters"]:
+                    line("Персонажей не заведено — откройте менеджер персонажей выше.", ok=False)
+                for c in report["characters"]:
+                    if not c["exists"]:
+                        line(f"Персонаж «{c['character_name']}» (триггер «{c['trigger_word']}»): нет иконки ({c.get('error', 'нет файла')})", ok=False)
+                    else:
+                        size_txt = f", {c['size'][0]}x{c['size'][1]}px" if c.get("size") else ""
+                        line(f"Персонаж «{c['character_name']}» (триггер «{c['trigger_word']}»): иконка есть{size_txt}", ok=True)
+                line(f"Порог похожести {report['similarity_threshold']}, confidence {report['match_confidence']}")
+                line("Готово. Если игра сейчас открыта на экране выбора персонажа/в меню — "
+                     "используйте кнопки «Проверить на экране» ниже для каждого шаблона.")
+
+            btn_row = tk.Frame(diag_frame)
+            btn_row.pack(fill="x", pady=(6, 0))
+            tk.Button(btn_row, text="Запустить диагностику", command=run_diagnostics, padx=10, pady=4).pack(side="left")
+            def _open_voice_dir():
+                try:
+                    import os
+                    os.startfile(cfg_mod.VOICE_DIR)
+                except OSError as e:
+                    logger.warning("Не удалось открыть папку голосового модуля: %s", e)
+
+            tk.Button(btn_row, text="Открыть папку модели/шаблонов", padx=10, pady=4,
+                      command=_open_voice_dir).pack(side="left", padx=(6, 0))
+
+            live_row = tk.Frame(diag_frame)
+            live_row.pack(fill="x", pady=(6, 0))
+            tk.Label(live_row, text="Проверить шаблон на экране прямо сейчас:", font=("Segoe UI", 8)).pack(anchor="w")
+            live_btns = tk.Frame(live_row)
+            live_btns.pack(fill="x")
+
+            def check_template(name):
+                def _do():
+                    found, msg = voice_select.try_locate_template(name, cfg.voice_match_confidence)
+                    line(f"{name}: {msg}", ok=found)
+                    diag_text.see(tk.END)
+                return _do
+
+            live_names = list(voice_select.TEMPLATE_FILES) + [c.icon_file for c in cfg.voice_characters if c.icon_file]
+            for tpl_name in live_names:
+                tk.Button(live_btns, text=tpl_name, command=check_template(tpl_name), padx=6, pady=3).pack(
+                    side="left", padx=(0, 4), pady=(2, 0))
+
+            trig_frame = tk.LabelFrame(nb_frame, text="Проверка слова-триггера (без микрофона)", padx=8, pady=6)
+            trig_frame.pack(fill="x", pady=(8, 0))
+            trig_row = tk.Frame(trig_frame)
+            trig_row.pack(fill="x")
+            tk.Label(trig_row, text="Текст:").pack(side="left")
+            trig_entry = tk.Entry(trig_row, width=30)
+            trig_entry.pack(side="left", padx=(4, 8))
+            trig_result = tk.StringVar(value="")
+            tk.Label(trig_row, textvariable=trig_result, font=("Segoe UI", 9, "bold")).pack(side="left")
+
+            def on_trig_change(*_):
+                text = trig_entry.get().strip().lower()
+                if not text:
+                    trig_result.set("")
+                    return
+                if not cfg.voice_characters:
+                    trig_result.set("персонажей не заведено")
+                    return
+                match = voice_select.match_character(text, cfg.voice_characters, cfg.voice_similarity_threshold)
+                if match is not None:
+                    trig_result.set(f"сработает: «{match.name}»")
+                    return
+                best_ratio = max(
+                    (voice_select.trigger_similarity(text, c.trigger_word) for c in cfg.voice_characters),
+                    default=0.0,
+                )
+                trig_result.set(f"НЕ сработает (лучшая похожесть {best_ratio:.2f})")
+
+            trig_entry.bind("<KeyRelease>", on_trig_change)
+
+            def refresh_status():
+                if not guide_state.get("visible"):
+                    root.destroy()
+                    return
+                if voice_engine is not None:
+                    status_var.set(voice_engine.status_text)
+                else:
+                    status_var.set("модуль недоступен")
+                root.after(1000, refresh_status)
+
+            refresh_status()
+            run_diagnostics()
+            root.mainloop()
+        except Exception as e:
+            logger.warning("Ошибка окна диагностики голосового выбора: %s", e)
+            guide_state["visible"] = False
+
+    threading.Thread(target=_window, daemon=True).start()
+
+
+def capture_screen_region(instruction: str) -> Optional[tuple[int, int, int, int]]:
+    """БЛОКИРУЕТ вызывающий поток. Показывает полупрозрачное окно на весь
+    экран (сквозь него видно, что происходит в игре) — пользователь тянет
+    мышью рамку вокруг нужного элемента и отпускает кнопку. Возвращает
+    (left, top, width, height) в пикселях экрана, либо None, если отменено
+    (Esc) или рамка не была реально протянута."""
+    result = {"rect": None}
+    done = threading.Event()
+
+    def _run():
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+            root.attributes("-fullscreen", True)
+            root.attributes("-alpha", 0.35)
+            root.attributes("-topmost", True)
+            root.configure(bg="black")
+            root.config(cursor="cross")
+
+            canvas = tk.Canvas(root, bg="black", highlightthickness=0)
+            canvas.pack(fill="both", expand=True)
+            canvas.create_text(
+                root.winfo_screenwidth() // 2, 40,
+                text=instruction + "\n(потяните мышью рамку вокруг нужного места; Esc — отмена)",
+                fill="white", font=("Segoe UI", 14, "bold"), justify="center",
+            )
+
+            start: dict = {}
+            rect_id = {"id": None}
+
+            def on_press(event):
+                start["x"], start["y"] = event.x_root, event.y_root
+                rect_id["id"] = canvas.create_rectangle(event.x, event.y, event.x, event.y,
+                                                          outline="#4caf50", width=3)
+
+            def on_drag(event):
+                if rect_id["id"] is not None and "x" in start:
+                    x0 = start["x"] - root.winfo_rootx()
+                    y0 = start["y"] - root.winfo_rooty()
+                    canvas.coords(rect_id["id"], x0, y0, event.x, event.y)
+
+            def on_release(event):
+                if "x" not in start:
+                    return
+                x1, y1 = start["x"], start["y"]
+                x2, y2 = event.x_root, event.y_root
+                left, right = sorted((x1, x2))
+                top, bottom = sorted((y1, y2))
+                w, h = right - left, bottom - top
+                root.destroy()
+                if w >= 8 and h >= 8:
+                    result["rect"] = (left, top, w, h)
+
+            def on_escape(_event):
+                root.destroy()
+
+            canvas.bind("<ButtonPress-1>", on_press)
+            canvas.bind("<B1-Motion>", on_drag)
+            canvas.bind("<ButtonRelease-1>", on_release)
+            root.bind("<Escape>", on_escape)
+            root.mainloop()
+            time.sleep(0.2)  # дать окну реально исчезнуть с экрана перед скриншотом
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=_run, daemon=True).start()
+    done.wait(timeout=180)
+    return result["rect"]
+
+
+def _ensure_shared_voice_templates(logger) -> bool:
+    """Пункт меню паузы «Выбрать персонажа» и кнопка подтверждения выбора
+    одинаковые для всех персонажей — их достаточно снять один раз. Если они
+    уже есть на диске, ничего не спрашивает и сразу возвращает True."""
+    menu_path = cfg_mod.VOICE_TEMPLATES_DIR / voice_select.TEMPLATE_MENU_ITEM
+    button_path = cfg_mod.VOICE_TEMPLATES_DIR / voice_select.TEMPLATE_SELECT_BUTTON
+    if menu_path.exists() and button_path.exists():
+        return True
+
+    if not voice_select.model_is_present():
+        if not ask_yes_no(
+            "Настройка голосового выбора",
+            "Сейчас скачаю модель распознавания речи (~45 МБ, нужен интернет).\n\nНачать?",
+        ):
+            return False
+        ok, err = voice_select.download_model(logger)
+        if not ok:
+            system.show_error_box("Настройка голосового выбора", f"Не удалось скачать модель:\n{err}")
+            return False
+
+    steps = [
+        (
+            "Общие элементы — шаг 1 из 2",
+            "Открой Garry's Mod, зайди на сервер и нажми ESC — должно открыться меню паузы.\n\n"
+            "Когда меню паузы видно на экране, нажми «ОК» — после этого обведи мышью рамку "
+            "вокруг пункта «Выбрать персонажа».",
+            voice_select.TEMPLATE_MENU_ITEM,
+            "Обведи рамкой пункт «Выбрать персонажа»",
+        ),
+        (
+            "Общие элементы — шаг 2 из 2",
+            "Теперь по-настоящему кликни мышью на «Выбрать персонажа» в меню — должен открыться "
+            "экран выбора персонажа. Наведи курсор на любую иконку так, чтобы появилась кнопка "
+            "«ВЫБРАТЬ ПЕРСОНАЖА» (пока НЕ нажимай её).\n\nКогда кнопка видна на экране, нажми "
+            "«ОК» — после этого обведи рамкой саму кнопку.",
+            voice_select.TEMPLATE_SELECT_BUTTON,
+            "Обведи рамкой кнопку «ВЫБРАТЬ ПЕРСОНАЖА»",
+        ),
+    ]
+    for title, message, filename, drag_instruction in steps:
+        system.show_info_box(title, message)
+        rect = capture_screen_region(drag_instruction)
+        if rect is None:
+            system.show_error_box("Настройка голосового выбора", "Отменено — рамка не была обведена.")
+            return False
+        ok, note = voice_select.save_template_from_region(filename, rect)
+        if not ok:
+            system.show_error_box("Настройка голосового выбора", f"Не удалось сохранить «{filename}»:\n{note}")
+            return False
+        logger.info("Общий шаблон %s сохранён (%s).", filename, note)
+    return True
+
+
+def open_character_manager(cfg: AppConfig, voice_engine: Optional["voice_select.VoiceSelectEngine"],
+                            save_config: Callable[[], None], logger, state: dict, guide_state: dict):
+    """Система создания и управления персонажами голосового выбора — одно
+    окно вместо нескольких разрозненных пунктов меню трея (было: отдельный
+    мастер настройки только под одного захардкоженного персонажа + отдельный
+    пункт «слово-триггер», который тоже относился только к нему одному).
+    Здесь можно добавить сколько угодно персонажей, у каждого — своё слово-
+    триггер и своя иконка, переснять иконку заново или удалить персонажа."""
+    if state.get("visible"):
+        return
+    state["visible"] = True
+
+    def _window():
+        try:
+            import tkinter as tk
+        except ImportError:
+            state["visible"] = False
+            return
+        try:
+            root = tk.Tk()
+            root.title("Персонажи — голосовой выбор")
+            root.geometry("560x520")
+
+            def on_close():
+                state["visible"] = False
+                root.destroy()
+            root.protocol("WM_DELETE_WINDOW", on_close)
+
+            tk.Label(
+                root, justify="left", font=("Segoe UI", 8), fg="#555",
+                text=(
+                    "Каждый персонаж — своё слово-триггер и своя иконка с экрана выбора "
+                    "персонажа.\nДва персонажа могут иметь одинаковое слово-триггер (например, "
+                    "общий талант) — сработает тот,\nчьё слово окажется ближе всего к "
+                    "услышанному тексту.\nПодробный пошаговый гайд — кнопка «Гайд по настройке» "
+                    "ниже. Уведомление Windows и звук при выборе\nперсонажа можно настроить "
+                    "отдельно для каждого — кнопки внизу."
+                ),
+            ).pack(fill="x", padx=8, pady=(8, 4), anchor="w")
+
+            list_frame = tk.Frame(root)
+            list_frame.pack(fill="both", expand=True, padx=8)
+            listbox = tk.Listbox(list_frame, font=("Segoe UI", 10), activestyle="dotbox")
+            listbox.pack(side="left", fill="both", expand=True)
+            scrollbar = tk.Scrollbar(list_frame, command=listbox.yview)
+            scrollbar.pack(side="right", fill="y")
+            listbox.config(yscrollcommand=scrollbar.set)
+
+            def refresh_list():
+                listbox.delete(0, tk.END)
+                if not cfg.voice_characters:
+                    listbox.insert(tk.END, "(персонажей пока нет — нажми «Добавить персонажа»)")
+                    return
+                for c in cfg.voice_characters:
+                    has_icon = bool(c.icon_file) and (cfg_mod.VOICE_TEMPLATES_DIR / c.icon_file).exists()
+                    mark = "иконка есть" if has_icon else "НЕТ ИКОНКИ"
+                    sound_mark = " 🔊свой звук" if c.sound_file else ""
+                    listbox.insert(tk.END, f"{c.name}  —  триггер «{c.trigger_word}»  [{mark}]{sound_mark}")
+
+            def selected_character():
+                if not cfg.voice_characters:
+                    return None
+                sel = listbox.curselection()
+                if not sel or sel[0] >= len(cfg.voice_characters):
+                    return None
+                return cfg.voice_characters[sel[0]]
+
+            def reload_engine():
+                cfg.voice_select_enabled = True
+                save_config()
+                if voice_engine is not None:
+                    voice_engine.load_async(logger)
+
+            def add_character():
+                if not voice_select.DEPENDENCIES_AVAILABLE:
+                    system.show_error_box(
+                        "Добавление персонажа",
+                        "Не установлены нужные библиотеки: " + ", ".join(voice_select.MISSING_DEPENDENCIES) +
+                        ".\nВыполните: pip install -r requirements-voice.txt",
+                    )
+                    return
+                name = ask_text("Новый персонаж", "Имя персонажа (только для себя, в игре нигде не показывается):")
+                if not name or not name.strip():
+                    return
+                name = name.strip()
+                trigger = ask_text(
+                    "Новый персонаж",
+                    f"Слово-триггер для «{name}» — то, что нужно сказать вслух, чтобы выбрать его "
+                    "(например, талант персонажа):",
+                )
+                if not trigger or not trigger.strip():
+                    return
+                if not _ensure_shared_voice_templates(logger):
+                    return
+                system.show_info_box(
+                    "Добавление персонажа",
+                    f"Открой экран выбора персонажа и найди иконку «{name}» в избранном.\n\n"
+                    "Когда она видна на экране, нажми «ОК» — после этого обведи её рамкой.",
+                )
+                rect = capture_screen_region(f"Обведи рамкой иконку «{name}»")
+                if rect is None:
+                    system.show_error_box("Добавление персонажа", "Отменено — рамка не была обведена.")
+                    return
+                character = voice_select.add_character(cfg, name, trigger.strip())
+                ok, note = voice_select.save_template_from_region(character.icon_file, rect)
+                if not ok:
+                    voice_select.remove_character(cfg, character, delete_icon_file=False)
+                    system.show_error_box("Добавление персонажа", f"Не удалось сохранить иконку:\n{note}")
+                    return
+                reload_engine()
+                logger.info("Персонаж «%s» добавлен (слово-триггер «%s»).", character.name, character.trigger_word)
+                refresh_list()
+
+            def rename_trigger():
+                character = selected_character()
+                if character is None:
+                    return
+                text = ask_text(
+                    "Слово-триггер",
+                    f"Слово-триггер для «{character.name}».\nСейчас: {character.trigger_word}",
+                )
+                if text is None or not text.strip():
+                    return
+                character.trigger_word = text.strip().lower()
+                save_config()
+                logger.info("Слово-триггер персонажа «%s» изменено на «%s».", character.name, character.trigger_word)
+                refresh_list()
+
+            def recapture_icon():
+                character = selected_character()
+                if character is None:
+                    return
+                system.show_info_box(
+                    "Переснять иконку",
+                    f"Открой экран выбора персонажа так, чтобы была видна иконка «{character.name}».\n\n"
+                    "Когда видна — нажми «ОК» и обведи её рамкой.",
+                )
+                rect = capture_screen_region(f"Обведи рамкой иконку «{character.name}»")
+                if rect is None:
+                    return
+                ok, note = voice_select.save_template_from_region(character.icon_file, rect)
+                if not ok:
+                    system.show_error_box("Переснять иконку", f"Не удалось сохранить:\n{note}")
+                    return
+                refresh_list()
+
+            def set_notify_message():
+                character = selected_character()
+                if character is None:
+                    return
+                text = ask_text(
+                    "Уведомление Windows",
+                    f"Текст уведомления Windows при выборе «{character.name}» голосом.\n"
+                    "Плейсхолдер {name} подставит имя персонажа.\n"
+                    "Оставь поле пустым и нажми «ОК», чтобы вернуть текст по умолчанию.\n\n"
+                    f"Сейчас: {character.notify_text()}",
+                )
+                if text is None:
+                    return
+                character.notify_message = text.strip()
+                save_config()
+                logger.info("Текст уведомления персонажа «%s» изменён на «%s».",
+                            character.name, character.notify_text())
+                refresh_list()
+
+            def set_character_sound():
+                character = selected_character()
+                if character is None:
+                    return
+                from tkinter import filedialog
+                # ВАЖНО: не использовать ask_open_file() здесь — оно создаёт
+                # СВОЙ отдельный tk.Tk() в отдельном потоке, а это окно
+                # менеджера персонажей уже само крутит tk.mainloop() в своём
+                # потоке. Два живых Tk-корня в разных потоках одновременно —
+                # именно то, из-за чего программа падала при нажатии «Свой
+                # звук...». Правильно — открыть диалог через УЖЕ существующий
+                # root этого окна, в том же потоке, без нового Tk()/потока.
+                path = filedialog.askopenfilename(
+                    parent=root,
+                    title=f"Звук при выборе «{character.name}» голосом",
+                    filetypes=[("WAV файлы", "*.wav"), ("Все файлы", "*.*")],
+                )
+                if not path:
+                    return
+                character.sound_file = path
+                save_config()
+                logger.info("Звук персонажа «%s» изменён на: %s", character.name, path)
+                refresh_list()
+
+            def clear_character_sound():
+                character = selected_character()
+                if character is None:
+                    return
+                character.sound_file = ""
+                save_config()
+                logger.info("Звук персонажа «%s» сброшен на стандартный.", character.name)
+                refresh_list()
+
+            def test_character_sound():
+                character = selected_character()
+                if character is None:
+                    return
+                sound.play_character_sound(cfg, character, logger)
+
+            def delete_character():
+                character = selected_character()
+                if character is None:
+                    return
+                if not ask_yes_no("Удалить персонажа", f"Удалить «{character.name}» из списка?"):
+                    return
+                voice_select.remove_character(cfg, character)
+                save_config()
+                logger.info("Персонаж «%s» удалён.", character.name)
+                refresh_list()
+
+            def open_guide():
+                open_voice_guide(cfg, voice_engine, guide_state, save_config, state, logger)
+
+            btn_row0 = tk.Frame(root)
+            btn_row0.pack(fill="x", padx=8, pady=(8, 0))
+            tk.Button(btn_row0, text="📖 Гайд по настройке...", command=open_guide, padx=6, pady=4).pack(fill="x")
+
+            btn_row1 = tk.Frame(root)
+            btn_row1.pack(fill="x", padx=8, pady=(6, 2))
+            tk.Button(btn_row1, text="➕ Добавить персонажа...", command=add_character, padx=10, pady=6,
+                      bg="#4caf50", fg="white", font=("Segoe UI", 9, "bold")).pack(fill="x")
+
+            btn_row2 = tk.Frame(root)
+            btn_row2.pack(fill="x", padx=8, pady=(2, 2))
+            tk.Button(btn_row2, text="Изменить слово-триггер", command=rename_trigger, padx=6, pady=4).pack(side="left")
+            tk.Button(btn_row2, text="Переснять иконку", command=recapture_icon, padx=6, pady=4).pack(
+                side="left", padx=(6, 0))
+            tk.Button(btn_row2, text="Удалить", command=delete_character, padx=6, pady=4).pack(
+                side="left", padx=(6, 0))
+
+            btn_row3 = tk.Frame(root)
+            btn_row3.pack(fill="x", padx=8, pady=(2, 8))
+            tk.Button(btn_row3, text="Текст уведомления...", command=set_notify_message, padx=6, pady=4).pack(side="left")
+            tk.Button(btn_row3, text="Свой звук...", command=set_character_sound, padx=6, pady=4).pack(
+                side="left", padx=(6, 0))
+            tk.Button(btn_row3, text="Сбросить звук", command=clear_character_sound, padx=6, pady=4).pack(
+                side="left", padx=(6, 0))
+            tk.Button(btn_row3, text="🔊 Проверить звук", command=test_character_sound, padx=6, pady=4).pack(
+                side="left", padx=(6, 0))
+
+            refresh_list()
+            root.mainloop()
+        except Exception as e:
+            logger.warning("Ошибка окна менеджера персонажей: %s", e)
+        finally:
+            state["visible"] = False
 
     threading.Thread(target=_window, daemon=True).start()
 
@@ -529,6 +1166,7 @@ def build_menu(
     mic_test_state: dict,
     reregister_hotkeys: Callable[[], bool],
     save_config: Callable[[], None],
+    voice_engine: Optional["voice_select.VoiceSelectEngine"] = None,
 ):
     def not_calibrating(item=None):
         return not calibration_state.get("active")
@@ -789,6 +1427,97 @@ def build_menu(
     change_hotkey = change_hotkey_for("hotkey", "запуск игры")
     change_pause_hotkey = change_hotkey_for("pause_hotkey", "быстрая пауза")
 
+    def download_voice_model(icon, item=None):
+        def _flow():
+            logger.info("Голосовой выбор персонажа: начинаю скачивание модели...")
+            icon.title = "Snap-to-GMod: скачиваю модель распознавания речи..."
+            ok, err = voice_select.download_model(logger)
+            icon.title = "Snap-to-GMod: жду щелчка"
+            if ok:
+                logger.info("Голосовой выбор персонажа: модель скачана.")
+                icon.notify("Модель скачана, включаю распознавание.", "Голосовой выбор персонажа")
+                if voice_engine is not None:
+                    voice_engine.load_async(logger)
+            else:
+                logger.warning("Голосовой выбор персонажа: не удалось скачать модель: %s", err)
+                system.show_error_box(
+                    "Snap-to-GMod",
+                    f"Не удалось скачать модель автоматически:\n{err}\n\n"
+                    "Можно скачать вручную с https://alphacephei.com/vosk/models "
+                    "и распаковать в папку модели (пункт «Открыть папку модели/шаблонов»).",
+                )
+        threading.Thread(target=_flow, daemon=True).start()
+
+    def toggle_voice_select(icon, item):
+        if cfg.voice_select_enabled:
+            cfg.voice_select_enabled = False
+            save_config()
+            if voice_engine is not None:
+                voice_engine.unload(logger)
+            return
+
+        if voice_engine is None or not voice_select.DEPENDENCIES_AVAILABLE:
+            missing = ", ".join(voice_select.MISSING_DEPENDENCIES) if voice_engine is not None else "модуль недоступен"
+            system.show_error_box(
+                "Snap-to-GMod",
+                f"Не установлены нужные библиотеки: {missing}.\nВыполните: pip install -r requirements-voice.txt",
+            )
+            return
+
+        cfg.voice_select_enabled = True
+        save_config()
+
+        def _flow():
+            if not voice_select.model_is_present() and ask_yes_no(
+                "Голосовой выбор персонажа",
+                "Модель распознавания речи не найдена.\n\n"
+                "Скачать маленькую русскую модель автоматически (~45 МБ, vosk-model-small-ru-0.22)?\n\n"
+                "«Нет» — включу без скачивания, модель можно будет положить вручную позже "
+                "(пункт «Открыть папку модели/шаблонов»).",
+            ):
+                download_voice_model(icon)
+            else:
+                voice_engine.load_async(logger)
+
+        threading.Thread(target=_flow, daemon=True).start()
+
+    def voice_select_status_label(item=None):
+        if voice_engine is None:
+            return "Голосовой выбор персонажа: недоступно"
+        return f"Голосовой выбор персонажа: {voice_engine.status_text}"
+
+    def open_voice_folder(icon, item):
+        try:
+            import os
+            os.startfile(cfg_mod.VOICE_DIR)
+        except OSError as e:
+            logger.warning("Не удалось открыть папку голосового модуля: %s", e)
+
+    VOICE_GUIDE_STATE = {"visible": False}
+    CHAR_MANAGER_STATE = {"visible": False}
+
+    def open_voice_guide_window(icon, item):
+        open_voice_guide(cfg, voice_engine, VOICE_GUIDE_STATE, save_config, CHAR_MANAGER_STATE, logger)
+
+    def open_character_manager_window(icon, item):
+        open_character_manager(cfg, voice_engine, save_config, logger, CHAR_MANAGER_STATE, VOICE_GUIDE_STATE)
+
+    def characters_label(item=None):
+        n = len(cfg.voice_characters)
+        return f"Персонажи ({n})..." if n else "Персонажи (добавить...)"
+
+    voice_select_menu = pystray.Menu(
+        pystray.MenuItem(voice_select_status_label, None, enabled=False),
+        pystray.MenuItem("Включено", toggle_voice_select, checked=lambda item: cfg.voice_select_enabled),
+        pystray.MenuItem("Скачать модель распознавания автоматически (~45 МБ)...", download_voice_model,
+                          enabled=lambda item: voice_select.DEPENDENCIES_AVAILABLE),
+        pystray.MenuItem(characters_label, open_character_manager_window,
+                          enabled=lambda item: voice_select.DEPENDENCIES_AVAILABLE and not CHAR_MANAGER_STATE.get("visible")),
+        pystray.MenuItem(
+            "Открыть папку модели/шаблонов (model/ и templates/)...", open_voice_folder,
+        ),
+    )
+
     settings_menu = pystray.Menu(
         pystray.MenuItem("Чувствительность", detection_menu),
         pystray.MenuItem("Микрофон", mic_menu),
@@ -797,6 +1526,7 @@ def build_menu(
         pystray.MenuItem("Discord", discord_menu),
         pystray.MenuItem(lambda item: f"Горячая клавиша запуска: {cfg.hotkey or 'не задана'}", change_hotkey),
         pystray.MenuItem(lambda item: f"Жест быстрой паузы: {cfg.pause_hotkey or 'не задан'}", change_pause_hotkey),
+        pystray.MenuItem("Голосовой выбор персонажа", voice_select_menu),
         pystray.MenuItem("Только обнаружение (без запуска игры, только уведомление)", toggle_detection_only,
                           checked=lambda item: cfg.detection_only),
         pystray.MenuItem("Проверять доступность сервера перед запуском", toggle_check_availability,
@@ -834,7 +1564,11 @@ def build_menu(
             LOG_VIEWER_STATE["visible"] = False
         else:
             LOG_VIEWER_STATE["visible"] = True
-            open_log_viewer(LOG_VIEWER_STATE, logger)
+            open_log_viewer(icon, LOG_VIEWER_STATE, logger)
+        try:
+            icon.update_menu()
+        except Exception:
+            pass
 
     def export_settings(icon, item):
         def _flow():

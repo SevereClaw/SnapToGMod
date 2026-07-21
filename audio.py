@@ -123,10 +123,18 @@ def audio_loop(
     on_calibration_done: Callable[[], None],
     on_heard: Callable[[], None],
     save_config: Callable[[], None],
+    voice_engine=None,
 ) -> None:
     """Работает в фоновом потоке: слушает микрофон и вызывает переданные
     колбэки — сам поток ничего не знает про иконку трея или tkinter,
-    только про звук и конфиг."""
+    только про звук и конфиг.
+
+    voice_engine (voice_select.VoiceSelectEngine) — опционален. Если
+    передан и включён (cfg.voice_select_enabled) и модель Vosk загружена,
+    каждый блок этого же аудиопотока дополнительно прогоняется через
+    распознавание речи. Отдельный sd.InputStream для этого специально НЕ
+    открывается — два потока к одному микрофону на Windows нередко
+    конфликтуют (особенно в эксклюзивном режиме WASAPI)."""
     last_heard_flash = 0.0
     recent_peaks: collections.deque = collections.deque(maxlen=12)  # ~250-300 мс истории
     ambient_floor: collections.deque = collections.deque(maxlen=200)  # ~4 сек фонового шума
@@ -146,6 +154,12 @@ def audio_loop(
         if mic_test_state.get("active"):
             mic_test_state["peak"] = peak_now
             return
+
+        if voice_engine is not None and cfg.voice_select_enabled and voice_engine.ready:
+            try:
+                voice_engine.process_block(audio_block, SAMPLE_RATE, logger)
+            except Exception as e:
+                logger.warning("Голосовой выбор персонажа: ошибка обработки блока: %s", e)
 
         if calibration_state.get("active"):
             peak = snap_peak_if_shaped(audio_block)

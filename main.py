@@ -46,6 +46,7 @@ import discord_notify
 import sound
 import tray
 import updates
+import voice_select
 
 
 def main() -> None:
@@ -81,6 +82,30 @@ def main() -> None:
     mic_test_state = {"active": False, "peak": 0.0}
     icon_state_holder: list = []
 
+    def notify_windows(message: str, title: str) -> None:
+        """Обёртка над icon.notify(): раньше ошибка здесь (например,
+        Shell_NotifyIcon не сработал, потому что иконка ещё не готова, или
+        сообщение долетело, а сама Windows молча съела баллон — так бывает
+        при включённом «Фокусировке внимания»/режиме «Не беспокоить») просто
+        падала в лог как необработанное исключение или вообще терялась —
+        теперь причина будет видна в журнале программы."""
+        try:
+            icon.notify(message, title)
+        except Exception as e:
+            logger.warning(
+                "Не удалось показать уведомление Windows («%s: %s»): %s. "
+                "Проверьте, не включён ли в Windows режим «Фокусировка внимания»/«Не беспокоить» — "
+                "он тоже может молча скрывать всплывающие уведомления от программ.",
+                title, message, e,
+            )
+
+    voice_engine = voice_select.VoiceSelectEngine(cfg, voice_select.VoiceHooks(
+        on_heard=lambda: icon_state_holder[0].flash(
+            tray.TrayState["HEARD"], "Snap-to-GMod: услышал слово-триггер...", 0.6, stop_event,
+        ),
+        on_result=lambda success, message: notify_windows(message, "Голосовой выбор персонажа"),
+    ))
+
     def reregister_hotkeys() -> bool:
         return hotkeys.reregister_all_hotkeys(cfg, on_hotkey_pressed, on_pause_hotkey_pressed, logger)
 
@@ -90,7 +115,7 @@ def main() -> None:
         show_countdown=lambda seconds, name: tray.show_countdown_dialog(seconds, name, icon_state_holder[0], stop_event, logger),
         play_sound=lambda event: sound.play_event_sound(cfg, event, logger),
         send_discord=lambda server: discord_notify.send_discord_notification(cfg, server, logger),
-        windows_notify=lambda title, msg: icon.notify(msg, title) if icon_state_holder else None,
+        windows_notify=lambda title, msg: notify_windows(msg, title) if icon_state_holder else None,
     )
 
     def run_trigger():
@@ -123,7 +148,8 @@ def main() -> None:
         tray.make_icon_image(tray.COLORS[tray.TrayState["IDLE"]]),
         "Snap-to-GMod: запускается...",
         menu=tray.build_menu(cfg, logger, on_quit, pause_event, icon_state_holder,
-                              calibration_state, mic_test_state, reregister_hotkeys, save_config),
+                              calibration_state, mic_test_state, reregister_hotkeys, save_config,
+                              voice_engine=voice_engine),
     )
 
     def setup(icon):
@@ -133,10 +159,13 @@ def main() -> None:
         icon_state = tray.IconStateManager(icon)
         icon_state_holder.append(icon_state)
         reregister_hotkeys()
+        if cfg.voice_select_enabled:
+            voice_engine.load_async(logger)
         threading.Thread(
             target=audio.audio_loop,
             args=(cfg, logger, stop_event, pause_event, trigger_state, calibration_state, mic_test_state),
             kwargs=dict(
+                voice_engine=voice_engine,
                 on_snap_detected=lambda: threading.Thread(target=run_trigger, daemon=True).start(),
                 on_calibration_progress=lambda: icon_state.flash(
                     tray.TrayState["TRIGGER"],
