@@ -800,9 +800,10 @@ def open_character_manager(cfg: AppConfig, voice_engine: Optional["voice_select.
                 root, justify="left", font=("Segoe UI", 8), fg="#555",
                 text=(
                     "Каждый персонаж — своё слово-триггер и своя иконка с экрана выбора "
-                    "персонажа.\nДва персонажа могут иметь одинаковое слово-триггер (например, "
-                    "общий талант) — сработает тот,\nчьё слово окажется ближе всего к "
-                    "услышанному тексту.\nПодробный пошаговый гайд — кнопка «Гайд по настройке» "
+                    "персонажа.\nСлово-триггер должно быть уникальным: если у двух персонажей "
+                    "общий талант (например,\n«Удача»), добавьте к фразе имя — «удача нагито», "
+                    "«удача макото» — иначе второй\nперсонаж с тем же словом никогда не будет "
+                    "выбран голосом.\nПодробный пошаговый гайд — кнопка «Гайд по настройке» "
                     "ниже. Уведомление Windows и звук при выборе\nперсонажа можно настроить "
                     "отдельно для каждого — кнопки внизу."
                 ),
@@ -853,13 +854,29 @@ def open_character_manager(cfg: AppConfig, voice_engine: Optional["voice_select.
                 if not name or not name.strip():
                     return
                 name = name.strip()
-                trigger = ask_text(
-                    "Новый персонаж",
+                prompt = (
                     f"Слово-триггер для «{name}» — то, что нужно сказать вслух, чтобы выбрать его "
-                    "(например, талант персонажа):",
+                    "(например, талант персонажа):"
                 )
-                if not trigger or not trigger.strip():
-                    return
+                trigger = None
+                while True:
+                    trigger = ask_text("Новый персонаж", prompt)
+                    if not trigger or not trigger.strip():
+                        return
+                    conflict = voice_select.trigger_word_conflict(cfg, trigger)
+                    if conflict is None:
+                        break
+                    # Слова-триггеры должны быть уникальными — иначе при
+                    # одинаковой похожести всегда выигрывает первый по
+                    # порядку персонаж, а второй с тем же словом становится
+                    # недостижим голосом (см. docstring match_character в
+                    # voice_select.py). Просим другую фразу, например с
+                    # добавлением имени персонажа.
+                    prompt = (
+                        f"Слово-триггер «{trigger.strip()}» уже используется персонажем "
+                        f"«{conflict.name}». Слова-триггеры должны быть уникальными — "
+                        f"придумайте отдельную фразу, например «{trigger.strip()} {name}»:"
+                    )
                 if not _ensure_shared_voice_templates(logger):
                     return
                 system.show_info_box(
@@ -871,7 +888,11 @@ def open_character_manager(cfg: AppConfig, voice_engine: Optional["voice_select.
                 if rect is None:
                     system.show_error_box("Добавление персонажа", "Отменено — рамка не была обведена.")
                     return
-                character = voice_select.add_character(cfg, name, trigger.strip())
+                try:
+                    character = voice_select.add_character(cfg, name, trigger.strip())
+                except ValueError as e:
+                    system.show_error_box("Добавление персонажа", str(e))
+                    return
                 ok, note = voice_select.save_template_from_region(character.icon_file, rect)
                 if not ok:
                     voice_select.remove_character(cfg, character, delete_icon_file=False)
@@ -885,12 +906,22 @@ def open_character_manager(cfg: AppConfig, voice_engine: Optional["voice_select.
                 character = selected_character()
                 if character is None:
                     return
-                text = ask_text(
-                    "Слово-триггер",
-                    f"Слово-триггер для «{character.name}».\nСейчас: {character.trigger_word}",
-                )
-                if text is None or not text.strip():
-                    return
+                prompt = f"Слово-триггер для «{character.name}».\nСейчас: {character.trigger_word}"
+                while True:
+                    text = ask_text("Слово-триггер", prompt)
+                    if text is None or not text.strip():
+                        return
+                    conflict = voice_select.trigger_word_conflict(cfg, text, exclude_slug=character.slug)
+                    if conflict is None:
+                        break
+                    # Как и при добавлении персонажа — слова-триггеры обязаны
+                    # быть уникальными, иначе один из двух персонажей с
+                    # одинаковым словом станет недостижим голосом.
+                    prompt = (
+                        f"Слово-триггер «{text.strip()}» уже используется персонажем "
+                        f"«{conflict.name}». Слова-триггеры должны быть уникальными — "
+                        f"придумайте отдельную фразу, например «{text.strip()} {character.name}»:"
+                    )
                 character.trigger_word = text.strip().lower()
                 save_config()
                 logger.info("Слово-триггер персонажа «%s» изменено на «%s».", character.name, character.trigger_word)

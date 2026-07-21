@@ -21,16 +21,17 @@ from typing import Optional
 
 FROZEN: bool = getattr(sys, "frozen", False)  # True, если это собранный PyInstaller .exe
 
-APP_VERSION = "3.1"
+APP_VERSION = "3.2.0"
 APP_NAME = "SnapToGMod"
 
-# Репозиторий используется для проверки GitHub Releases. Теги релизов должны
-# иметь вид "v3.1", "v3.2" и т. п.
-GITHUB_REPO = "SevereClaw/SnapToGMod"
+# Укажите свой GitHub-репозиторий "имя-пользователя/название-репозитория",
+# чтобы заработала проверка обновлений. Требуются GitHub Releases с тегами
+# вида "v1.0.1".
+GITHUB_REPO = "yourusername/snap-to-gmod"
 
-# Секреты нельзя хранить в публичном репозитории. Для Discord-уведомлений
-# задайте переменную окружения SNAPTOGMOD_DISCORD_WEBHOOK_URL перед запуском.
-DISCORD_WEBHOOK_URL = os.environ.get("SNAPTOGMOD_DISCORD_WEBHOOK_URL", "").strip()
+# Вебхук Discord-канала для уведомлений о срабатывании. Меняется только тут,
+# в коде — пользователь редактирует лишь своё отображаемое имя.
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1528392905507475588/J65N_zXPNRfF1RxxHSn0cdJ2E-VMmlDXyNgw8BtnQ4euozaAYECjZ1swURbyiYsJZUyC"
 
 RUN_KEY_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -166,10 +167,15 @@ def ascii_safe_filename_slug(name: str) -> str:
 class VoiceCharacter:
     """Один персонаж для голосового выбора: своё слово-триггер и своя
     иконка-шаблон (скриншот из раздела "избранное" на экране выбора
-    персонажа). Несколько персонажей могут делить одно и то же
-    слово-триггер (например, у двух персонажей один и тот же талант) —
-    тогда сработает тот, чьё слово-триггер по итогу окажется ближе к
-    услышанному тексту.
+    персонажа). Слово-триггер должно быть уникальным среди всех персонажей
+    (это проверяется в voice_select.add_character() / trigger_word_conflict()
+    и в диалоге переименования триггера в tray.py) — при одинаковом слове у
+    двух персонажей коэффициент похожести получается одинаковым, а сравнение
+    `ratio > best_ratio` в voice_select.match_character() всегда оставляет
+    первого по порядку, так что второй персонаж стал бы недостижим голосом.
+    Если у двух персонажей общий талант (например, "Удача" у Нагито Комаэды
+    и Макото Наэги), фразу нужно сделать уникальной — например "удача
+    нагито" и "удача макото".
 
     notify_message — свой текст уведомления Windows при успешном выборе
     именно этого персонажа (плейсхолдер {name} подставляется как имя

@@ -9,11 +9,14 @@ Vosk (изначально — отдельный скрипт select_nagito.py 
 cfg.voice_characters) — у каждого своё слово-триггер и своя иконка-шаблон
 (скриншот из раздела "избранное" на экране выбора персонажа). Меню паузы и
 кнопка "Выбрать персонажа" на экране одни и те же для всех персонажей, эти
-два шаблона (TEMPLATE_MENU_ITEM, TEMPLATE_SELECT_BUTTON) общие. Персонажи с
-одинаковым словом-триггером (например, общий талант "Удача" у двух разных
-персонажей в разных играх серии) не конфликтуют: при распознавании
-побеждает тот, чьё слово-триггер оказалось ближе всего к услышанному
-тексту (см. match_character) — а не первый по порядку.
+два шаблона (TEMPLATE_MENU_ITEM, TEMPLATE_SELECT_BUTTON) общие. Слова-триггеры
+должны быть уникальными: при одинаковом слове-триггере у двух персонажей
+коэффициент похожести (difflib.ratio) для обоих получается одинаковым, а
+условие `ratio > best_ratio` в match_character() всегда оставляет первого
+по порядку — второй персонаж был бы недостижим голосом. Поэтому
+уникальность проверяется при добавлении/переименовании персонажа
+(add_character(), tray.py) — например, "удача нагито" и "удача макото"
+вместо общего "удача" у двух персонажей с одним и тем же талантом.
 
 Полностью опционально:
   - если библиотеки vosk / pyautogui / pydirectinput / pygetwindow не
@@ -236,11 +239,13 @@ def match_character(
 ) -> Optional[VoiceCharacter]:
     """Ищет персонажа, чьё слово-триггер лучше всего совпало с услышанным
     текстом. Раньше был ровно один персонаж и одно слово-триггер — теперь их
-    может быть несколько, в том числе с ОДИНАКОВЫМ словом-триггером
-    (например, общий талант "Удача" у разных персонажей). В этом случае
-    побеждает не первый по списку, а тот, у кого похожесть выше — иначе при
-    двух персонажах на одно слово всегда выбирался бы только первый
-    добавленный, а остальные были бы недостижимы."""
+    может быть несколько. Слова-триггеры персонажей должны быть уникальными
+    (это проверяется при добавлении/переименовании, см. add_character() и
+    trigger_word_conflict() ниже): при равном коэффициенте похожести
+    условие `ratio > best_ratio` всегда оставляет первого по порядку
+    персонажа, так что при двух одинаковых словах-триггерах второй
+    персонаж был бы недостижим голосом вообще. Здесь же побеждает просто
+    персонаж с наибольшей похожестью выше порога threshold."""
     best: Optional[VoiceCharacter] = None
     best_ratio = 0.0
     for character in characters:
@@ -249,6 +254,35 @@ def match_character(
             best = character
             best_ratio = ratio
     return best
+
+
+def normalize_trigger_word(trigger_word: str) -> str:
+    """Нормализует слово-триггер для сравнения на уникальность: убирает
+    пробелы по краям и внутри, приводит к нижнему регистру. Используется,
+    чтобы «Удача», «удача» и «удача » считались одним и тем же словом-
+    триггером при проверке дублей — а не только байт-в-байт совпадением."""
+    return trigger_word.strip().lower().replace(" ", "")
+
+
+def trigger_word_conflict(
+    cfg: AppConfig, trigger_word: str, exclude_slug: Optional[str] = None,
+) -> Optional[VoiceCharacter]:
+    """Возвращает персонажа, уже использующего это слово-триггер (сравнение
+    через normalize_trigger_word — без учёта регистра и пробелов), кроме
+    персонажа с exclude_slug (сам переименовываемый персонаж). None — слово
+    свободно. Слова-триггеры обязаны быть уникальными: иначе для двух
+    персонажей с одинаковым словом получается одинаковый коэффициент
+    похожести, а `ratio > best_ratio` в match_character() всегда оставляет
+    только первого по порядку — второй персонаж был бы недостижим голосом."""
+    norm = normalize_trigger_word(trigger_word)
+    if not norm:
+        return None
+    for character in cfg.voice_characters:
+        if exclude_slug is not None and character.slug == exclude_slug:
+            continue
+        if normalize_trigger_word(character.trigger_word) == norm:
+            return character
+    return None
 
 
 def character_icon_path(character: VoiceCharacter) -> Path:
@@ -278,7 +312,20 @@ def add_character(cfg: AppConfig, name: str, trigger_word: str) -> VoiceCharacte
     """Создаёт нового персонажа (без иконки — её сохраняют отдельно через
     save_template_from_region(character.icon_file, rect)) и добавляет его в
     cfg.voice_characters. Не сохраняет конфиг на диск — это делает вызывающий
-    код (обычно сразу после сохранения иконки, одним save_config())."""
+    код (обычно сразу после сохранения иконки, одним save_config()).
+
+    Бросает ValueError, если trigger_word уже занято другим персонажем (см.
+    trigger_word_conflict) — слова-триггеры должны быть уникальными, иначе
+    второй персонаж с тем же словом никогда не будет выбран (см. docstring
+    match_character). В этом случае нужна другая, уникальная фраза —
+    например, «удача нагито» и «удача макото» вместо общего «удача»."""
+    conflict = trigger_word_conflict(cfg, trigger_word)
+    if conflict is not None:
+        raise ValueError(
+            f"слово-триггер «{trigger_word.strip()}» уже используется персонажем "
+            f"«{conflict.name}». Слова-триггеры должны быть уникальными — придумайте "
+            f"отдельную фразу, например «{trigger_word.strip()} {name.strip()}»."
+        )
     slug = slugify_character_name(name)
     taken_slugs = {c.slug for c in cfg.voice_characters}
     unique_slug = slug
